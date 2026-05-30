@@ -32,13 +32,13 @@
 下载地址：
 
 ```text
-https://github.com/YYY887/cidaren/releases/tag/1.0.1
+https://github.com/YYY887/cidaren/releases/tag/v1.1.0
 ```
 
 Windows 推荐下载：
 
 ```text
-词达人助手-1.0.0-win-x64.exe
+cidaren-1.1.0-win-x64.exe
 ```
 
 Linux 如果已发布 deb 包，则下载对应的 `.deb` 文件。
