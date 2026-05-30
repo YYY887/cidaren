@@ -160,6 +160,9 @@ build/          打包图标资源
 
 ## Star 统计
 
-| 项目 | 数量 |
-| --- | --- |
-| GitHub Stars | [![GitHub stars](https://img.shields.io/github/stars/YYY887/cidaren?style=flat-square&label=Stars)](https://github.com/YYY887/cidaren/stargazers) |
+<a href="https://github.com/YYY887/cidaren">
+  <img
+    src="https://github-readme-stats.vercel.app/api/pin/?username=YYY887&repo=cidaren&show_owner=true&theme=default&hide_border=true"
+    alt="cidaren GitHub Star 统计"
+  />
+</a>
