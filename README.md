@@ -6,19 +6,11 @@
 
 ## 项目截图
 
-### 抓包页面
-
 <img src="img/1.png" alt="抓包页面" width="720" />
-
-### 任务页面
 
 <img src="img/2.png" alt="任务页面" width="720" />
 
-### 设置页面
-
 <img src="img/3.png" alt="设置页面" width="720" />
-
-### 托盘状态
 
 <img src="img/4.png" alt="托盘状态" width="720" />
 
