@@ -1,0 +1,7 @@
+node_modules/
+dist/
+release/
+*.env
+bank.json
+bank.json.lock
+.DS_Store

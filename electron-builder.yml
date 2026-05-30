@@ -1,0 +1,48 @@
+appId: com.cidaren.electron
+productName: 词达人助手
+copyright: Copyright © 2024
+
+directories:
+  output: release
+  buildResources: build
+
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+
+files:
+  - dist/**/*
+  - "!**/*.ts"
+  - "!**/*.map"
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+mac:
+  icon: build/icon.png
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  category: public.app-category.education
+
+linux:
+  icon: build/icon.png
+  target:
+    - target: deb
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  category: Education
