@@ -160,9 +160,19 @@ build/          打包图标资源
 
 ## Star 统计
 
-<a href="https://github.com/YYY887/cidaren">
-  <img
-    src="https://github-readme-stats.vercel.app/api/pin/?username=YYY887&repo=cidaren&show_owner=true&theme=default&hide_border=true"
-    alt="cidaren GitHub Star 统计"
-  />
+<a href="https://star-history.com/#YYY887/cidaren&Date">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://api.star-history.com/svg?repos=YYY887/cidaren&type=Date&theme=dark"
+    />
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="https://api.star-history.com/svg?repos=YYY887/cidaren&type=Date"
+    />
+    <img
+      alt="cidaren Star History"
+      src="https://api.star-history.com/svg?repos=YYY887/cidaren&type=Date"
+    />
+  </picture>
 </a>
