@@ -35,21 +35,21 @@
 
 ## 下载安装
 
-如果只是使用软件，不需要自己构建，可以直接到项目的 `release/` 目录下载打包好的程序。
+如果只是使用软件，不需要自己构建，可以直接到项目的 Releases 页面下载打包好的程序。
+
+下载地址：
+
+```text
+https://github.com/YYY887/cidaren/releases
+```
 
 Windows 推荐下载：
 
 ```text
-release/词达人助手-1.0.0-win-x64.exe
+词达人助手-1.0.0-win-x64.exe
 ```
 
-Linux 如果已生成 deb 包，则下载：
-
-```text
-release/词达人助手-1.0.0-linux-x64.deb
-```
-
-也可以进入 `release/linux-unpacked/` 或 `release/win-unpacked/` 运行解包版本。
+Linux 如果已发布 deb 包，则下载对应的 `.deb` 文件。
 
 ## 使用教程
 
@@ -157,3 +157,9 @@ build/          打包图标资源
 ## 免责声明
 
 本项目仅用于学习、研究和个人自动化实践。请勿用于违反平台规则、影响他人权益或未经授权的场景。使用本项目造成的账号、数据或网络风险由使用者自行承担。
+
+## Star 统计
+
+| 项目 | 数量 |
+| --- | --- |
+| GitHub Stars | [![GitHub stars](https://img.shields.io/github/stars/YYY887/cidaren?style=flat-square&label=Stars)](https://github.com/YYY887/cidaren/stargazers) |
