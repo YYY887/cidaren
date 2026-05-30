@@ -40,7 +40,7 @@
 下载地址：
 
 ```text
-https://github.com/YYY887/cidaren/releases
+https://github.com/YYY887/cidaren/releases/tag/1.0.1
 ```
 
 Windows 推荐下载：
