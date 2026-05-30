@@ -68,7 +68,9 @@ export function registerIpcHandlers(
       const agent = { http: new http.Agent(), https: new https.Agent() }
 
       const baseUrl = config.LLM_URL.replace(/\/+$/, '')
-      const url = baseUrl.endsWith('/v1')
+      const url = baseUrl === 'https://api.deepseek.com'
+        ? `${baseUrl}/chat/completions`
+        : baseUrl.endsWith('/v1')
         ? `${baseUrl}/chat/completions`
         : `${baseUrl}/v1/chat/completions`
 
@@ -81,9 +83,13 @@ export function registerIpcHandlers(
         json: {
           model: config.LLM_MODEL || 'step-3.6',
           messages: [
-            { role: 'user', content: '请回复"OK"两个字母' },
+            {
+              role: 'system',
+              content: '你只负责输出最终答案。禁止输出推理、解释、分析、复述题目、前言、步骤、标点说明。输出必须极短，除了答案本身不要有任何字符。',
+            },
+            { role: 'user', content: '请回复OK两个字母' },
           ],
-          max_tokens: 10,
+          max_tokens: 4096,
         },
         timeout: { request: 15000 },
         responseType: 'json',
@@ -99,9 +105,20 @@ export function registerIpcHandlers(
         return { ok: false, error: `HTTP ${statusCode}: ${errMsg}` }
       }
 
-      const choices = body.choices as Array<{ message: { content: string } }> | undefined
+      const choices = body.choices as Array<{
+        finish_reason?: string
+        message?: { content?: string }
+      }> | undefined
       if (choices && choices.length > 0) {
-        const reply = choices[0].message.content.trim()
+        const choice = choices[0]
+        const reply = (choice.message?.content ?? '').trim()
+        if (!reply) {
+          const finishReason = choice.finish_reason ? `，finish_reason: ${choice.finish_reason}` : ''
+          return {
+            ok: false,
+            error: `模型返回空内容${finishReason}，响应: ${JSON.stringify(body).slice(0, 300)}`,
+          }
+        }
         return { ok: true, reply, model: config.LLM_MODEL }
       }
       return { ok: false, error: `响应异常: ${JSON.stringify(body).slice(0, 200)}` }

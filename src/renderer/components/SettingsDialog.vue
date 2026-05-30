@@ -3,7 +3,7 @@
  * SettingsDialog - 设置抽屉
  * LLM 配置、课程设置、代理端口等
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 // ── 类型 ──
@@ -18,6 +18,9 @@ interface ConfigData {
   LLM_MODEL: string
   LLM_KEY: string
 }
+
+type LlmProvider = 'custom' | 'siliconflow' | 'deepseek'
+type FixedLlmProvider = Exclude<LlmProvider, 'custom'>
 
 // ── Props & Emits ──
 
@@ -49,19 +52,59 @@ const missingAuth = ref<string[]>([])
 const llmTesting = ref(false)
 const llmTestResult = ref('')
 const llmTestOk = ref(false)
-const llmProvider = ref<'custom' | 'siliconflow'>('custom')
+const llmProvider = ref<LlmProvider>('custom')
 
 const defaultCustomLlmUrl = 'https://ai.saurlax.com/v1'
 const defaultCustomLlmModel = 'step-3.6'
-const siliconFlowUrl = 'https://api.siliconflow.cn/v1'
-const siliconFlowOfficialUrl = 'https://cloud.siliconflow.cn/account/ak'
-const siliconFlowDefaultModel = 'Qwen/Qwen2.5-7B-Instruct'
+const fixedProviders = {
+  siliconflow: {
+    label: '轨迹流动 API',
+    url: 'https://api.siliconflow.cn/v1',
+    officialUrl: 'https://cloud.siliconflow.cn/account/ak',
+    defaultModel: 'Qwen/Qwen2.5-7B-Instruct',
+    tip: '轨迹流动 API 已固定接口地址，只需要填写 Key 和模型名称。',
+    officialLabel: '打开官网获取 Key',
+    copySuccess: '轨迹流动官网链接已复制',
+  },
+  deepseek: {
+    label: 'DeepSeek 官方 API',
+    url: 'https://api.deepseek.com',
+    officialUrl: 'https://platform.deepseek.com/api_keys',
+    defaultModel: 'deepseek-v4-flash',
+    tip: 'DeepSeek 官方 API 已固定接口地址，只需要填写 Key 和模型名称。',
+    officialLabel: '打开 DeepSeek 平台',
+    copySuccess: 'DeepSeek 平台链接已复制',
+  },
+} satisfies Record<FixedLlmProvider, {
+  label: string
+  url: string
+  officialUrl: string
+  defaultModel: string
+  tip: string
+  officialLabel: string
+  copySuccess: string
+}>
+
+const providerOptions = [
+  { label: '自定义 API', value: 'custom' },
+  ...Object.entries(fixedProviders).map(([value, item]) => ({ label: item.label, value })),
+] as Array<{ label: string; value: LlmProvider }>
 
 const customLlmUrlCache = ref(defaultCustomLlmUrl)
 const customLlmModelCache = ref(defaultCustomLlmModel)
 const customLlmKeyCache = ref('')
-const siliconFlowModelCache = ref(siliconFlowDefaultModel)
-const siliconFlowKeyCache = ref('')
+const fixedProviderCache = ref<Record<FixedLlmProvider, { model: string; key: string }>>({
+  siliconflow: {
+    model: fixedProviders.siliconflow.defaultModel,
+    key: '',
+  },
+  deepseek: {
+    model: fixedProviders.deepseek.defaultModel,
+    key: '',
+  },
+})
+
+const fixedProvider = computed(() => llmProvider.value === 'custom' ? null : fixedProviders[llmProvider.value])
 
 // ── 方法 ──
 
@@ -85,14 +128,16 @@ async function loadConfig() {
     }
     envFilePath.value = res.envFile || ''
     missingAuth.value = res.missingAuth || []
-    llmProvider.value = config.value.LLM_URL.trim() === siliconFlowUrl ? 'siliconflow' : 'custom'
-    if (llmProvider.value === 'siliconflow') {
-      siliconFlowModelCache.value = config.value.LLM_MODEL || siliconFlowDefaultModel
-      siliconFlowKeyCache.value = config.value.LLM_KEY || ''
-    } else {
+    llmProvider.value = resolveLlmProvider(config.value.LLM_URL)
+    if (llmProvider.value === 'custom') {
       customLlmUrlCache.value = config.value.LLM_URL || defaultCustomLlmUrl
       customLlmModelCache.value = config.value.LLM_MODEL || defaultCustomLlmModel
       customLlmKeyCache.value = config.value.LLM_KEY || ''
+    } else {
+      fixedProviderCache.value[llmProvider.value] = {
+        model: config.value.LLM_MODEL || fixedProviders[llmProvider.value].defaultModel,
+        key: config.value.LLM_KEY || '',
+      }
     }
   } catch (e) {
     ElMessage.error('读取配置失败: ' + (e instanceof Error ? e.message : String(e)))
@@ -141,22 +186,41 @@ async function testLlm() {
   }
 }
 
-function handleLlmProviderChange(provider: 'custom' | 'siliconflow') {
-  const currentIsSiliconFlow = config.value.LLM_URL.trim() === siliconFlowUrl
-  if (currentIsSiliconFlow) {
-    siliconFlowModelCache.value = config.value.LLM_MODEL || siliconFlowDefaultModel
-    siliconFlowKeyCache.value = config.value.LLM_KEY || ''
-  } else {
+function normalizeUrl(url: string): string {
+  return url.trim().replace(/\/+$/, '')
+}
+
+function resolveLlmProvider(url: string): LlmProvider {
+  const normalizedUrl = normalizeUrl(url)
+  const match = Object.entries(fixedProviders).find(([, item]) => normalizeUrl(item.url) === normalizedUrl)
+  return match ? match[0] as FixedLlmProvider : 'custom'
+}
+
+function rememberCurrentLlmConfig() {
+  const currentProvider = resolveLlmProvider(config.value.LLM_URL)
+  if (currentProvider === 'custom') {
     customLlmUrlCache.value = config.value.LLM_URL || defaultCustomLlmUrl
     customLlmModelCache.value = config.value.LLM_MODEL || defaultCustomLlmModel
     customLlmKeyCache.value = config.value.LLM_KEY || ''
+    return
   }
 
-  if (provider === 'siliconflow') {
-    config.value.LLM_URL = siliconFlowUrl
-    config.value.LLM_MODEL = siliconFlowModelCache.value || siliconFlowDefaultModel
-    config.value.LLM_KEY = siliconFlowKeyCache.value
-    ElMessage.success('已切换为轨迹流动 API，只需填写 Key 和模型名')
+  fixedProviderCache.value[currentProvider] = {
+    model: config.value.LLM_MODEL || fixedProviders[currentProvider].defaultModel,
+    key: config.value.LLM_KEY || '',
+  }
+}
+
+function handleLlmProviderChange(provider: LlmProvider) {
+  rememberCurrentLlmConfig()
+
+  if (provider !== 'custom') {
+    const item = fixedProviders[provider]
+    const cache = fixedProviderCache.value[provider]
+    config.value.LLM_URL = item.url
+    config.value.LLM_MODEL = cache.model || item.defaultModel
+    config.value.LLM_KEY = cache.key
+    ElMessage.success(`已切换为${item.label}，只需填写 Key 和模型名`)
     return
   }
 
@@ -165,14 +229,18 @@ function handleLlmProviderChange(provider: 'custom' | 'siliconflow') {
   config.value.LLM_KEY = customLlmKeyCache.value
 }
 
-function openSiliconFlowOfficial() {
-  window.cidaren.openExternal(siliconFlowOfficialUrl)
+function openProviderOfficial() {
+  if (fixedProvider.value) {
+    window.cidaren.openExternal(fixedProvider.value.officialUrl)
+  }
 }
 
-async function copySiliconFlowOfficialUrl() {
+async function copyProviderOfficialUrl() {
+  if (!fixedProvider.value) return
+
   try {
-    await navigator.clipboard.writeText(siliconFlowOfficialUrl)
-    ElMessage.success('轨迹流动官网链接已复制')
+    await navigator.clipboard.writeText(fixedProvider.value.officialUrl)
+    ElMessage.success(fixedProvider.value.copySuccess)
   } catch (e) {
     ElMessage.error('复制失败: ' + (e instanceof Error ? e.message : String(e)))
   }
@@ -290,21 +358,25 @@ defineExpose({ loadConfig })
               style="width: 100%"
               @change="handleLlmProviderChange"
             >
-              <el-option label="自定义 API" value="custom" />
-              <el-option label="轨迹流动 API" value="siliconflow" />
+              <el-option
+                v-for="item in providerOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
             </el-select>
           </el-form-item>
           <el-form-item v-if="llmProvider === 'custom'" label="LLM_URL">
             <el-input v-model="config.LLM_URL" :placeholder="defaultCustomLlmUrl" />
           </el-form-item>
           <el-form-item v-else label="LLM_URL">
-            <el-input :model-value="siliconFlowUrl" disabled />
-            <div class="form-tip">轨迹流动 API 已固定接口地址，只需要填写 Key 和模型名称。</div>
-            <div class="siliconflow-actions">
-              <el-button size="small" type="primary" plain @click="openSiliconFlowOfficial">
-                打开官网获取 Key
+            <el-input :model-value="fixedProvider?.url" disabled />
+            <div class="form-tip">{{ fixedProvider?.tip }}</div>
+            <div class="provider-actions">
+              <el-button size="small" type="primary" plain @click="openProviderOfficial">
+                {{ fixedProvider?.officialLabel }}
               </el-button>
-              <el-button size="small" plain @click="copySiliconFlowOfficialUrl">
+              <el-button size="small" plain @click="copyProviderOfficialUrl">
                 复制官网链接
               </el-button>
             </div>
@@ -312,7 +384,7 @@ defineExpose({ loadConfig })
           <el-form-item label="LLM_MODEL">
             <el-input
               v-model="config.LLM_MODEL"
-              :placeholder="llmProvider === 'siliconflow' ? siliconFlowDefaultModel : defaultCustomLlmModel"
+              :placeholder="fixedProvider?.defaultModel || defaultCustomLlmModel"
             />
           </el-form-item>
           <el-form-item label="LLM_KEY">
@@ -430,7 +502,7 @@ defineExpose({ loadConfig })
   color: #909399;
 }
 
-.siliconflow-actions {
+.provider-actions {
   display: flex;
   gap: 8px;
   margin-top: 8px;

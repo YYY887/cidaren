@@ -321,15 +321,17 @@ export class QuizEngine extends EventEmitter {
 
       if (mode === 0) {
         // ── 展示释义: 收集词义, 直接提交 ──
-        collectWordDefs(topic, wordDefs)
+        const added = collectWordDefs(topic, wordDefs)
         const opts = topic.options ?? []
         const defs = opts.map((o) => o.content).filter((c) => c)
-        this.emit('log', `  [${doneNow}/${totalNow}] 📖 ${stem} (${defs.length}个释义)`)
+        if (added) {
+          this.emit('log', `  [${doneNow}/${totalNow}] 📖 ${stem} (${defs.length}个释义)`)
+        }
 
         if (taskKind === 'study') {
-          saveResp = await this.client.studySubmit(code, randomMs(0.5, 1.5))
+          saveResp = await this.client.studySubmit(code, randomMs(0.1, 0.3))
         } else {
-          saveResp = await this.client.submit(code, randomMs(0.5, 1.5))
+          saveResp = await this.client.submit(code, randomMs(0.1, 0.3))
         }
       } else if (isCollocation(topic)) {
         // ── 搭配题: 多选循环 verify ──
@@ -556,16 +558,19 @@ export class QuizEngine extends EventEmitter {
       )
     } else {
       // 错误：用 answer_corrects 更新题库
+      const wrongAnswer = answer
       const corrects = (vd.answer_corrects as Answer[]) ?? []
+      const rawCorrects = this.compactJson(vd.answer_corrects)
       if (corrects.length > 0) {
         answer = corrects[0]
         this.bankCache.set(key, { ans: answer, stem })
         this.bankCache.save()
       }
       const disp = this.dispAnswer(opts, answer, mode)
+      const wrongDisp = this.dispAnswer(opts, wrongAnswer, mode)
       this.emit(
         'log',
-        `  [${doneNow}/${totalNow}] ⚠️ ${this.dispStem(stem, remark)} → ${disp} [${src}→fix]`
+        `  [${doneNow}/${totalNow}] ⚠️ ${this.dispStem(stem, remark)} → ${disp} [${src}→fix, 原答: ${wrongDisp}, corrects: ${rawCorrects}]`
       )
     }
 
@@ -603,7 +608,9 @@ export class QuizEngine extends EventEmitter {
       }
 
       retryCount += 1
-      this.emit('log', `    [${doneNow}/${totalNow}] LLM 暂不可用，暂停等待后重试（第 ${retryCount} 次）`)
+      const reason = this.llmClient.getLastFailure()
+      const detail = reason ? `，原因: ${reason}` : ''
+      this.emit('log', `    [${doneNow}/${totalNow}] LLM 暂不可用${detail}，暂停等待后重试（第 ${retryCount} 次）`)
       await sleep(20, 30, this.signal)
     }
 
@@ -636,11 +643,28 @@ export class QuizEngine extends EventEmitter {
     mode: number
   ): string {
     if (mode === 32 && typeof answer === 'string') {
-      return answer.slice(0, 30)
+      return this.compactText(answer)
     }
     if (typeof answer === 'number' && answer >= 0 && answer < opts.length) {
-      return (opts[answer]?.content ?? '?').slice(0, 30)
+      return this.compactText(opts[answer]?.content ?? '?')
     }
-    return String(answer).slice(0, 30)
+    return this.compactText(String(answer))
+  }
+
+  /** 把日志字段压短，避免空字符串看起来像没打印。 */
+  private compactText(value: string, maxLen = 40): string {
+    const text = value.replace(/\s+/g, ' ').trim()
+    if (!text) return '(空)'
+    return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text
+  }
+
+  /** 压缩 JSON 日志字段，兼容 undefined。 */
+  private compactJson(value: unknown, maxLen = 120): string {
+    if (value === undefined) return '(无)'
+    try {
+      return this.compactText(JSON.stringify(value), maxLen)
+    } catch {
+      return this.compactText(String(value), maxLen)
+    }
   }
 }

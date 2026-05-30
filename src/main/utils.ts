@@ -65,19 +65,25 @@ export function isCollocation(topic: Topic): boolean {
 export function collectWordDefs(
   topic: Topic,
   wordDefs: Map<string, string[]>
-): void {
-  if (topic.topic_mode !== 0) return
-
+): boolean {
+  if (topic.topic_mode !== 0) return false
   const word = (topic.stem?.content ?? '').replace(/\s+/g, '').toLowerCase()
-  if (!word) return
+  if (!word) return false
 
   const defs = (topic.options ?? [])
     .map((o) => o.content ?? '')
     .filter((c) => c.length > 0)
 
   if (defs.length > 0) {
+    const prev = wordDefs.get(word)
+    if (prev && prev.length === defs.length && prev.every((d, i) => d === defs[i])) {
+      return false
+    }
     wordDefs.set(word, defs)
+    return true
   }
+
+  return false
 }
 
 /**

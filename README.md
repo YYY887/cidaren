@@ -61,6 +61,13 @@ Linux 如果已发布 deb 包，则下载对应的 `.deb` 文件。
 
 - **自定义 API**：填写 `LLM_URL`、`LLM_MODEL`、`LLM_KEY`
 - **轨迹流动 API**：接口地址自动使用 `https://api.siliconflow.cn/v1`，只需要填写模型名和 Key
+- **DeepSeek 官方 API**：接口地址自动使用 `https://api.deepseek.com`，只需要填写模型名和 Key。推荐使用 `deepseek-v4-flash`，速度快、成本低，约 200 次请求 0.01 元。
+
+DeepSeek 推荐路由参考：
+
+<img src="img/5.png" alt="DeepSeek 推荐路由 1" width="720" />
+
+<img src="img/6.png" alt="DeepSeek 推荐路由 2" width="720" />
 
 配置完成后可以点击 **测试模型连通性**。
 

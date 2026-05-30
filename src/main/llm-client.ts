@@ -28,6 +28,9 @@ export interface LLMConfig {
  */
 function chatCompletionsUrl(llmUrl: string): string {
   const base = llmUrl.replace(/\/+$/, '')
+  if (base === 'https://api.deepseek.com') {
+    return `${base}/chat/completions`
+  }
   if (base.endsWith('/v1')) {
     return `${base}/chat/completions`
   }
@@ -72,6 +75,7 @@ function jitter(ms: number): number {
 
 export class LLMClient {
   private config: LLMConfig
+  private lastFailure = ''
 
   /** 所有 LLMClient 实例共享队列，避免多个任务并发请求 LLM */
   private static queue: Promise<void> = Promise.resolve()
@@ -79,9 +83,16 @@ export class LLMClient {
   private static rateLimitedUntil = 0
   private static readonly minRequestIntervalMs = 2500
   private static readonly maxAttempts = 5
+  private static readonly minResponseTokens = 4096
+  private static readonly maxResponseTokens = 4096
 
   constructor(config: LLMConfig) {
     this.config = config
+  }
+
+  /** 最近一次返回 null 的原因，用于任务日志展示。 */
+  getLastFailure(): string {
+    return this.lastFailure
   }
 
   /**
@@ -115,9 +126,11 @@ export class LLMClient {
    */
   async getAnswer(topic: Topic, wordDefs: Map<string, string[]>): Promise<Answer | null> {
     const { llmUrl, llmKey, llmModel } = this.config
+    this.lastFailure = ''
 
     // 未配置时直接返回 null
     if (!llmUrl?.trim() || !llmKey?.trim()) {
+      this.lastFailure = 'LLM_URL 或 LLM_KEY 未配置'
       return null
     }
 
@@ -131,17 +144,26 @@ export class LLMClient {
       'X-LLM-TAG': 'data_annotation',
     }
 
-    const data = {
+    let maxTokens = LLMClient.minResponseTokens
+    let lastBodyLog = ''
+    const dataBase = {
       model,
       messages: [
         {
           role: 'system',
-          content: '你是英语词汇专家。请精准回答，只输出答案，不要解释。',
+          content: [
+            '你只负责输出最终答案。',
+            '禁止输出推理、解释、分析、复述题目、前言、步骤、结论说明、标点说明。',
+            '不要输出思考过程，不要输出 reasoning_content，不要输出 markdown，不要输出代码块。',
+            '如果题目要求编号，只输出单个编号。',
+            '如果题目要求词组，只输出词组本身，词与词之间用英文逗号分隔。',
+            '如果不确定，也只能输出最可能的最终答案，不能解释。',
+            '输出必须极短，除了答案本身不要有任何字符。',
+          ].join(''),
         },
         { role: 'user', content: prompt },
       ],
       temperature: 0,
-      max_tokens: 64,
     }
 
     // 重试逻辑: 普通错误短退避；限速错误按 Retry-After 或指数退避进入全局冷却。
@@ -153,7 +175,7 @@ export class LLMClient {
         const resp = await got(url, {
           method: 'POST',
           headers,
-          json: data,
+          json: { ...dataBase, max_tokens: maxTokens },
           timeout: { request: 60000 },
           responseType: 'json',
           agent: directAgent,
@@ -163,14 +185,17 @@ export class LLMClient {
         if (resp.statusCode !== 200) {
           const errBody = resp.body as Record<string, unknown>
           const errMsg = (errBody.error as Record<string, unknown>)?.message || (errBody.message as string) || `HTTP ${resp.statusCode}`
-          lastErr = new Error(String(errMsg))
+          const detail = `HTTP ${resp.statusCode}: ${String(errMsg)}`
+          lastErr = new Error(detail)
+          this.lastFailure = detail
 
           if (attempt < LLMClient.maxAttempts - 1) {
             let waitMs = jitter(1500 * (attempt + 1))
             if (isRateLimit(resp.statusCode, String(errMsg))) {
               waitMs = retryAfterMs(resp.headers['retry-after']) ?? jitter(8000 * 2 ** attempt)
               LLMClient.rateLimitedUntil = Math.max(LLMClient.rateLimitedUntil, Date.now() + waitMs)
-              console.warn(`[LLM] 触发限速，等待 ${Math.round(waitMs / 1000)} 秒后重试`)
+              this.lastFailure = `${detail}，限速等待 ${Math.round(waitMs / 1000)} 秒`
+              console.warn(`[LLM] 触发限速，等待 ${Math.round(waitMs / 1000)} 秒后重试: ${detail}`)
             }
 
             await sleep(waitMs)
@@ -180,16 +205,46 @@ export class LLMClient {
         }
 
         const body = resp.body as Record<string, unknown>
-        const choices = body.choices as Array<{ message: { content: string } }> | undefined
+        lastBodyLog = JSON.stringify(body).slice(0, 500)
+        const choices = body.choices as Array<{
+          finish_reason?: string
+          message?: { content?: string; reasoning_content?: string }
+        }> | undefined
         if (!choices || choices.length === 0) {
+          this.lastFailure = `响应缺少 choices，响应: ${lastBodyLog}`
           return null
         }
 
-        const ansText = choices[0].message.content.trim()
-        return this.parseResponse(ansText, topic.topic_mode)
+        const choice = choices[0]
+        const contentText = (choice.message?.content ?? '').trim()
+        const reasoningText = (choice.message?.reasoning_content ?? '').trim()
+        const ansText = contentText || this.extractBriefReasoningAnswer(reasoningText)
+        const finishReason = choice.finish_reason ?? ''
+        if (finishReason === 'length') {
+          const nextTokens = Math.min(maxTokens * 2, LLMClient.maxResponseTokens)
+          const detail = `输出被截断: finish_reason=length, max_tokens=${maxTokens}, 响应: ${lastBodyLog}`
+          this.lastFailure = detail
+          if (attempt < LLMClient.maxAttempts - 1 && nextTokens > maxTokens) {
+            maxTokens = nextTokens
+            console.warn(`[LLM] 回复被截断，提升 max_tokens 到 ${maxTokens} 后重试`)
+            continue
+          }
+          return null
+        }
+
+        const answer = this.parseResponse(ansText, topic)
+        if (answer === null) {
+          const finishHint = finishReason ? `，finish_reason: ${finishReason}` : ''
+          this.lastFailure = `回复无法解析: ${ansText.slice(0, 120) || '(空回复)'}${finishHint}，响应: ${lastBodyLog}`
+        }
+        return answer
       } catch (err) {
         lastErr = err
+        this.lastFailure = err instanceof Error ? err.message : String(err)
         if (attempt < LLMClient.maxAttempts - 1) {
+          if (maxTokens < LLMClient.maxResponseTokens) {
+            maxTokens = Math.min(maxTokens * 2, LLMClient.maxResponseTokens)
+          }
           await sleep(jitter(1500 * (attempt + 1)))
           continue
         }
@@ -198,6 +253,7 @@ export class LLMClient {
 
     // 所有重试失败 - 输出错误信息
     const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr)
+    this.lastFailure = errMsg
     console.error(`[LLM] 请求失败 (${this.config.llmUrl}): ${errMsg}`)
     return null
   }
@@ -226,7 +282,7 @@ export class LLMClient {
 选项:
 ${optsStr}
 
-请选出正确的词并按正确顺序排列。只回答逗号分隔的选项内容(如: in,many,instances), 不要其他文字。`
+只输出答案本身，格式必须是逗号分隔的词组，例如: in,many,instances。`
     }
 
     if (mode === 31) {
@@ -234,7 +290,7 @@ ${optsStr}
 选项:
 ${optsStr}
 
-只回答选项编号(如: 0), 不要其他文字。`
+只输出答案本身，格式必须是单个编号，例如: 0。`
     }
 
     if (mode === 11) {
@@ -245,7 +301,7 @@ ${rk}选项:
 ${optsStr}
 
 注意: 单词常有多个词义和词性, 必须结合上下文和中文翻译判断该词在此句中的具体含义。
-只回答选项编号(如: 0), 不要其他文字。`
+只输出答案本身，格式必须是单个编号，例如: 0。`
     }
 
     // 其他 mode（fallback）
@@ -255,24 +311,37 @@ ${optsStr}
 选项:
 ${optsStr}
 
-选择正确答案。如果是选择题回答编号(如: 0); 如果是组词题回答逗号分隔的词(如: in,many,instances)。不要其他文字。`
+只输出答案本身。
+如果是选择题，只回答单个编号，例如: 0。
+如果是组词题，只回答逗号分隔的词组，例如: in,many,instances。`
   }
 
   /**
    * 解析 LLM 响应
-   * mode=32: 返回文本（逗号分隔的词）
+   * mode=32 或无选项填空题: 返回文本答案
    * 其他: 提取第一个数字
    */
-  private parseResponse(ansText: string, mode: number): Answer | null {
-    if (mode === 32) {
-      return ansText
+  private parseResponse(ansText: string, topic: Topic): Answer | null {
+    const text = ansText.trim()
+    if (!text) return null
+
+    if (topic.topic_mode === 32 || topic.options.length === 0) {
+      return text
     }
 
-    const m = ansText.match(/\d+/)
+    const m = text.match(/\d+/)
     if (m) {
       return parseInt(m[0], 10)
     }
 
     return null
+  }
+
+  /** DeepSeek 偶尔会把极短答案放进 reasoning_content。只接受像答案的短文本。 */
+  private extractBriefReasoningAnswer(text: string): string {
+    const answer = text.replace(/^[,，\s]+|[,，\s]+$/g, '').trim()
+    if (!answer || answer.length > 40) return ''
+    if (/[。！？.!?；;：:]/.test(answer)) return ''
+    return answer
   }
 }
